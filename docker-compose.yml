@@ -1,0 +1,58 @@
+x-common: &common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: kinova_gen3_ros2:latest
+  network_mode: host
+  volumes:
+    - /tmp/.X11-unix:/tmp/.X11-unix
+    - $XAUTHORITY:/root/.Xauthority
+    - /dev/shm:/dev/shm
+    - ./volumes:/root/volumes
+    - ./volumes/kortex_moveit_config_kinova_gen3_7dof_moveit_config_launch/servo.launch.py:/ros2_ws/src/ros2_kortex/kortex_moveit_config/kinova_gen3_7dof_robotiq_2f_85_moveit_config/launch/servo.launch.py
+    - ./volumes/kortex_bringup_config/Nservo.yaml:/ros2_ws/src/ros2_kortex/kortex_bringup/config/Nservo.yaml
+    - ./volumes/servo_keyboard_kinova:/ros2_ws/src/ros2_kortex/servo_keyboard_kinova
+  ipc: host
+  environment:
+    - ROS_DISTRO=jazzy
+    - RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+    - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
+    - DISPLAY=${DISPLAY:-:0}
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - driver: nvidia
+            capabilities: [ gpu ]
+            count: 1
+
+services:
+  kortex_sim:
+    <<: *common
+    container_name: kortex_sim
+    command: >
+      ros2 launch kortex_bringup kortex_sim_control.launch.py
+        sim_gazebo:=true
+        use_sim_time:=true
+        robot_type:=${ROBOT_TYPE:-gen3}
+        dof:=${DOF:-7}
+        gripper:=${GRIPPER:-robotiq_2f_85}
+        launch_rviz:=false
+
+  kortex_moveit:
+    <<: *common
+    container_name: kortex_moveit
+    depends_on:
+      - kortex_sim
+    command: >
+      ros2 launch kinova_gen3_7dof_robotiq_2f_85_moveit_config sim.launch.py
+        use_sim_time:=true
+        launch_rviz:=true
+  kortex_servo:
+    <<: *common
+    container_name: kortex_servo
+    depends_on:
+      - kortex_sim
+      - kortex_moveit
+    command: >
+      bash -c "cd /ros2_ws &&  source /opt/ros/jazzy/setup.bash && source install/setup.bash &&  colcon build --packages-select kinova_gen3_7dof_robotiq_2f_85_moveit_config kortex_description kortex_bringup &&  source install/setup.bash &&  ros2 launch kinova_gen3_7dof_robotiq_2f_85_moveit_config servo.launch.py use_sim_time:=true"
